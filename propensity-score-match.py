@@ -6,19 +6,20 @@
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import NearestNeighbors
 import matplotlib.pyplot as plt
 
 
-def propensity_score_match(X, y, mode='standard', caliper=0.05):
+def propensity_score_match(X, y, mode='log_reg_standard', caliper=0.05):
     '''
     :param X: DataFrame containing control and treatment samples. shape: (num_samples, num_features)
     :param y: Series containing corresponding treatment flag for each sample, 1: treatment sample, 0: control sample.
               shape: (num_samples,)
-    :param mode: 'standard': matching to the control sample to which there is the smallest absolute difference in
+    :param mode: 'log_reg_standard': matching to the control sample to which there is the smallest absolute difference in
                              propensity
-                 'mahalanobis': (not implemented yet) matches to sample with closest mahalanobis distance,
-                               from subset of control samples that have an absolute difference specified by 'caliper'
-    :param caliper: ('standard' mode) maximum difference in matched propensity scores for a valid match to be made
+                 'mbis': (not implemented yet) matches to sample with closest mahalanobis distance,
+                         from subset of control samples that have an absolute difference specified by 'caliper'
+    :param caliper: ('log_reg_standard' mode) maximum difference in matched propensity scores for a valid match to be made
                     ('mahalanobis' mode) maximum difference in propensity score, used to create a subset of samples
                     for which to compare the Mahalanobis distance.
     :return: Series, shape: (num_samples,). index is same as treatment, aligning with each treatment sample. value gives
@@ -30,6 +31,11 @@ def propensity_score_match(X, y, mode='standard', caliper=0.05):
         raise ValueError('Caliper must be between 0 and 1')
     elif not (y[y == 1].size < y[y == 0].size):
         raise ValueError('Treatment sample pool must be smaller than control sample pool.')
+    mode_options = ['log_reg_standard', 'mbis', 'nn']
+    if mode not in mode_options:
+        raise ValueError('Do not recognise value ' + str(mode) + ' for mode. ' +
+                         'Accepted values: ' + str(mode_options) + '.')
+
     # elif not X.index.is_unique():
     #     raise ValueError('Index of X argument must have unique values')
     # elif not X.index.equals(y.index):
@@ -56,22 +62,27 @@ def propensity_score_match(X, y, mode='standard', caliper=0.05):
     matches = np.vstack([np.arange(num_samples), np.full(num_samples, np.nan)]).T
 
     # save original index of each sample (in X) for use in the output
-    idx_in_X_treatment = matches[mask_treatment, 0].astype(int)
-    idx_in_X_control = matches[~mask_treatment, 0].astype(int)
+    idx_treatment = matches[mask_treatment, 0].astype(int)
+    idx_control = matches[~mask_treatment, 0].astype(int)
 
-    if mode == 'standard':
+    if mode == 'log_reg_standard':
         for i in range(p_treatment.size):  # for each treatment sample
             dist = np.abs(p_control - p_treatment[i])  # find distance to p_score of all control samples
             j = np.argmin(dist)  # save index of smallest distance
             if dist[j] <= caliper:
-                matches[idx_in_X_treatment[i], 1] = idx_in_X_control[j]  # save index in X of matched control sample
+                matches[idx_treatment[i], 1] = idx_control[j]  # save index in X of matched control sample
                 p_control = np.delete(p_control, j, 0)  # remove sample for next iteration
-                idx_in_X_control = np.delete(idx_in_X_control, j, 0)  # remove sample for next iteration
-        matches = matches[~np.isnan(matches[:, 1])].astype(int)  # keep only rows for matched treatment samples
-    elif mode == 'mahalanobis':
+                idx_control = np.delete(idx_control, j, 0)  # remove sample for next iteration
+    elif mode == 'mbis':
         # not coded yet
         raise RuntimeError('Error: mode \'mahalanobis\' is not written yet, please use mode \'standard\'.')
+    elif mode == 'nn':
+        neighbours = NearestNeighbors(n_neighbors=1, algorithm='ball_tree').fit(X[~mask_treatment])  # fit model to control samples
+        distances, indices = neighbours.kneighbors(X[mask_treatment])  # find nearest control sample to each treatment sample
+        indices = idx_control[indices.reshape(indices.shape[0])]  # retrieve index in X for each matched control sample
+        matches[mask_treatment, 1] = indices  # save index of each control sample into matches
 
+    matches = matches[~np.isnan(matches[:, 1])].astype(int)  # keep only rows for matched treatment samples
     return matches
 
 
@@ -100,7 +111,7 @@ control['treated'] = 0
 # merge data and match by propensity score
 y = treated['treated'].append(control['treated'])
 X = treated.drop('treated', axis=1).append(control.drop('treated', axis=1))
-matchings = propensity_score_match(X, y)
+matchings = propensity_score_match(X, y, mode='nn')
 
 control_matched = control.iloc[matchings[:, 1], :]  # extract matched control samples
 
