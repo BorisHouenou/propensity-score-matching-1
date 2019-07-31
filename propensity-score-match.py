@@ -63,19 +63,10 @@ def propensity_score_match(X, y, mode='standard', caliper=0.05):
         for i in range(p_treatment.size):  # for each treatment sample
             dist = np.abs(p_control - p_treatment[i])  # find distance to p_score of all control samples
             j = np.argmin(dist)  # save index of smallest distance
-            p_i = p_treatment[i]
-            p_j = p_control[j]
-            idx_i = idx_in_X_treatment[i]
-            idx_j = idx_in_X_control[j]
-            x_i = X[idx_i, :]
-            x_j = X[idx_j, :]
-            p_i = p_score[idx_i]
-            p_j = p_score[idx_j]
             if dist[j] <= caliper:
                 matches[idx_in_X_treatment[i], 1] = idx_in_X_control[j]  # save index in X of matched control sample
                 p_control = np.delete(p_control, j, 0)  # remove sample for next iteration
                 idx_in_X_control = np.delete(idx_in_X_control, j, 0)  # remove sample for next iteration
-                num_cont_samp = p_control.size
         matches = matches[~np.isnan(matches[:, 1])].astype(int)  # keep only rows for matched treatment samples
     elif mode == 'mahalanobis':
         # not coded yet
